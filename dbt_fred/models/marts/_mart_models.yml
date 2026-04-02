@@ -1,0 +1,30 @@
+# models/marts/_mart_models.yml
+
+version: 2
+
+models:
+  - name: mart_economic_dashboard
+    description: "Pre-aggregated dashboard table with all indicators, derived metrics, and recession signals"
+    columns:
+      - name: observation_month
+        description: "First day of month"
+        tests:
+          - unique
+          - not_null
+      - name: recession_risk_level
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+
+  - name: mart_indicator_summary
+    description: "Current snapshot of all indicators with latest values, trends, and historical context"
+    columns:
+      - name: latest_month
+        tests:
+          - not_null
+      - name: current_risk_level
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']

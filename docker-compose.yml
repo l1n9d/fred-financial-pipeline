@@ -1,0 +1,95 @@
+# docker-compose.yml
+# Simplified Airflow setup for local development
+# Uses LocalExecutor (no Celery/Redis needed — perfect for a portfolio project)
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.10.4-python3.11
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # Pass credentials into the container so the DAG can use them
+    FRED_API_KEY: ${FRED_API_KEY}
+    SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
+    SNOWFLAKE_USER: ${SNOWFLAKE_USER}
+    SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
+  volumes:
+    # Mount local folders into the container
+    - ./dags:/opt/airflow/dags
+    - ./dbt_fred:/opt/airflow/dbt_fred
+    - ./logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  # -------------------------------------------
+  # PostgreSQL — Airflow's metadata database
+  # (This is NOT your project data — it's just
+  # where Airflow tracks DAG runs and task state)
+  # -------------------------------------------
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+
+  # -------------------------------------------
+  # Airflow Init — runs once to set up the DB
+  # and create the admin user
+  # -------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@example.com || true &&
+        pip install dbt-snowflake snowflake-connector-python requests python-dotenv
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # -------------------------------------------
+  # Airflow Webserver — the UI at localhost:8080
+  # -------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    command: >
+      bash -c "pip install dbt-snowflake snowflake-connector-python requests python-dotenv &&
+               airflow webserver --port 8080"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------
+  # Airflow Scheduler — runs your DAGs on schedule
+  # -------------------------------------------
+  airflow-scheduler:
+    <<: *airflow-common
+    command: >
+      bash -c "pip install dbt-snowflake snowflake-connector-python requests python-dotenv &&
+               airflow scheduler"
+
+volumes:
+  postgres-data:

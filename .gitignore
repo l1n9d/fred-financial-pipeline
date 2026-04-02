@@ -1,0 +1,34 @@
+# Credentials — NEVER commit these
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# dbt
+dbt_fred/target/
+dbt_fred/dbt_packages/
+dbt_fred/logs/
+dbt_fred/package-lock.yml
+
+# Airflow
+logs/
+airflow.db
+webserver_config.py
+
+# Docker
+postgres-data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+ignore/

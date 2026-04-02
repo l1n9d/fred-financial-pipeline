@@ -1,0 +1,19 @@
+# dbt_fred/profiles.yml
+# This profile is used by Airflow inside Docker.
+# It reads credentials from environment variables
+# (set in docker-compose.yml from .env file).
+# local ~/.dbt/profiles.yml still works for manual dbt runs.
+
+dbt_fred:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      database: FRED_PIPELINE
+      warehouse: FRED_WH
+      role: ACCOUNTADMIN
+      schema: STAGING
+      threads: 1

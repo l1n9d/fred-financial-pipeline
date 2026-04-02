@@ -1,0 +1,41 @@
+
+# dbt_project.yml
+# This file tells dbt how your project is structured
+# and where to write output tables in Snowflake
+
+name: 'dbt_fred'
+version: '1.0.0'
+
+profile: 'dbt_fred'   # matches the profile name in ~/.dbt/profiles.yml
+
+# Where to find your models, tests, etc.
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+# Clean these folders when running dbt clean
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+# ============================================
+# Model Configuration
+# This maps folder structure → Snowflake schemas
+# ============================================
+models:
+  dbt_fred:
+
+    # models/staging/ → writes to FRED_PIPELINE.STAGING schema
+    staging:
+      +schema: STAGING
+      +materialized: view    # staging models are views (lightweight, always fresh)
+
+    # models/intermediate/ → writes to FRED_PIPELINE.INTERMEDIATE schema
+    intermediate:
+      +schema: INTERMEDIATE
+      +materialized: view    # intermediate models are views too
+
+    # models/marts/ → writes to FRED_PIPELINE.MARTS schema
+    marts:
+      +schema: MARTS
+      +materialized: table   # mart models are tables (faster for dashboards)

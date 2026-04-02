@@ -1,0 +1,41 @@
+# models/staging/_stg_sources.yml
+# This tells dbt where to find raw data in Snowflake.
+# Instead of hardcoding table names in SQL, we reference sources.
+# This makes it easy to swap data locations without changing models.
+
+version: 2
+
+sources:
+  - name: fred_raw
+    description: "Raw data ingested from the FRED API"
+    database: FRED_PIPELINE
+    schema: RAW
+
+    tables:
+      - name: fred_observations
+        description: "Raw economic indicator observations from FRED API"
+        columns:
+          - name: series_id
+            description: "FRED series identifier (e.g. UNRATE, GDP)"
+          - name: observation_date
+            description: "Date of the observation"
+          - name: value
+            description: "Observed value (NULL when FRED reports missing data)"
+          - name: ingested_at
+            description: "Timestamp when this row was loaded into Snowflake"
+          - name: source_url
+            description: "FRED API URL used to fetch this data"
+
+      - name: fred_series_metadata
+        description: "Metadata describing each FRED series"
+        columns:
+          - name: series_id
+            description: "FRED series identifier"
+          - name: title
+            description: "Human-readable series name"
+          - name: frequency
+            description: "Data frequency: Monthly, Quarterly, Daily"
+          - name: units
+            description: "Unit of measurement"
+          - name: seasonal_adj
+            description: "Seasonal adjustment method"

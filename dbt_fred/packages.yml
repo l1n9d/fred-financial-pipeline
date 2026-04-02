@@ -1,0 +1,7 @@
+# packages.yml
+# Place this file in the root of your dbt_fred/ folder (same level as dbt_project.yml)
+# Then run: dbt deps
+
+packages:
+  - package: dbt-labs/dbt_utils
+    version: [">=1.0.0", "<2.0.0"]

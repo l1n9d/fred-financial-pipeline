@@ -1,0 +1,43 @@
+# models/staging/_stg_models.yml
+# Defines tests and documentation for staging models.
+# dbt runs these tests to catch data quality issues early.
+
+version: 2
+
+models:
+  - name: stg_fred_observations
+    description: "Cleaned and deduplicated FRED observations"
+    columns:
+      - name: observation_id
+        description: "Surrogate key (hash of series_id + observation_date)"
+        tests:
+          - unique
+          - not_null
+      - name: series_id
+        description: "FRED series identifier"
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['UNRATE', 'CPIAUCSL', 'FEDFUNDS', 'GDP', 'T10Y2Y', 'UMCSENT']
+      - name: observation_date
+        description: "Date of observation"
+        tests:
+          - not_null
+      - name: value
+        description: "Observed value (NULLs already filtered out)"
+        tests:
+          - not_null
+
+  - name: stg_fred_metadata
+    description: "Cleaned FRED series metadata"
+    columns:
+      - name: series_id
+        description: "FRED series identifier"
+        tests:
+          - unique
+          - not_null
+      - name: series_title
+        description: "Human-readable series name"
+        tests:
+          - not_null

@@ -1,0 +1,35 @@
+# models/intermediate/_int_models.yml
+
+version: 2
+
+models:
+  - name: int_economic_indicators_pivoted
+    description: "Wide-format table with one row per month, one column per indicator"
+    columns:
+      - name: observation_month
+        description: "First day of the month"
+        tests:
+          - unique
+          - not_null
+
+  - name: int_indicators_with_changes
+    description: "Indicators enriched with MoM, YoY changes and rolling averages"
+    columns:
+      - name: observation_month
+        tests:
+          - unique
+          - not_null
+
+  - name: int_recession_signals
+    description: "Recession warning signals derived from economic indicators"
+    columns:
+      - name: observation_month
+        tests:
+          - unique
+          - not_null
+      - name: recession_risk_level
+        description: "LOW / MODERATE / ELEVATED / HIGH based on active signal count"
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
