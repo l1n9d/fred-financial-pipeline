@@ -29,21 +29,21 @@ FRED API ──→ Python Ingestion ──→ Snowflake (RAW)
                              Streamlit Dashboard
                                        
                  ┌─────────────────────────────────────┐
-                 │  Airflow orchestrates all steps      │
-                 │  daily on a cron schedule             │
+                 │  Airflow orchestrates all steps     │
+                 │  daily on a cron schedule           │
                  └─────────────────────────────────────┘
 ```
 
 ## Economic Indicators
 
-| Series | Indicator | Frequency | Why It Matters |
-|--------|-----------|-----------|----------------|
-| UNRATE | Unemployment Rate | Monthly | Primary labor market health metric |
-| CPIAUCSL | Consumer Price Index | Monthly | Core inflation measurement |
-| FEDFUNDS | Federal Funds Rate | Monthly | Fed monetary policy stance |
-| GDP | Gross Domestic Product | Quarterly | Broadest measure of economic output |
-| T10Y2Y | 10Y-2Y Treasury Spread | Daily | Leading recession indicator (yield curve) |
-| UMCSENT | Consumer Sentiment | Monthly | Forward-looking consumer confidence |
+| Series   | Indicator              | Frequency | Why It Matters                            |
+|----------|------------------------|-----------|------------------------------------------ |
+| UNRATE   | Unemployment Rate      | Monthly   | Primary labor market health metric        |
+| CPIAUCSL | Consumer Price Index   | Monthly   | Core inflation measurement                |
+| FEDFUNDS | Federal Funds Rate     | Monthly   | Fed monetary policy stance                |
+| GDP      | Gross Domestic Product | Quarterly | Broadest measure of economic output       |
+| T10Y2Y   | 10Y-2Y Treasury Spread | Daily     | Leading recession indicator (yield curve) |
+| UMCSENT  | Consumer Sentiment     | Monthly   | Forward-looking consumer confidence       |
 
 ## dbt Transformation Layers
 
@@ -180,14 +180,14 @@ streamlit run streamlit/app.py
 
 ## Tech Stack
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Ingestion | Python, requests | Pull data from FRED REST API |
-| Storage | Snowflake | Cloud data warehouse (RAW → STAGING → MARTS) |
-| Transformation | dbt | SQL-based modeling with testing and documentation |
-| Orchestration | Apache Airflow | Daily scheduled pipeline with task dependencies |
-| Visualization | Streamlit, Plotly | Interactive economic dashboard |
-| Containerization | Docker Compose | Local Airflow deployment |
+| Component        | Technology        | Purpose                                           |
+|------------------|-------------------|---------------------------------------------------|
+| Ingestion        | Python, requests  | Pull data from FRED REST API                      |
+| Storage          | Snowflake         | Cloud data warehouse (RAW → STAGING → MARTS)      |
+| Transformation   | dbt               | SQL-based modeling with testing and documentation |
+| Orchestration    | Apache Airflow    | Daily scheduled pipeline with task dependencies   |
+| Visualization    | Streamlit, Plotly | Interactive economic dashboard                    |
+| Containerization | Docker Compose    | Local Airflow deployment                          |
 
 ## Key Design Decisions
 
