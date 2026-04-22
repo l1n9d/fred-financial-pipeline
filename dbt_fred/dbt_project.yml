@@ -18,6 +18,13 @@ clean-targets:
   - "target"
   - "dbt_packages"
 
+vars:
+  # Recession signal thresholds (tunable without editing model SQL)
+  sahm_rule_threshold: 0.50          # pp rise in 3-mo avg unemployment vs 12-mo low
+  high_inflation_threshold: 5.0      # YoY CPI % above which signal triggers
+  low_sentiment_threshold: 60        # Michigan sentiment index floor
+  fed_tightening_threshold: 1.0      # pp YoY increase in fed funds rate
+
 # ============================================
 # Model Configuration
 # This maps folder structure → Snowflake schemas
