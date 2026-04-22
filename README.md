@@ -148,12 +148,18 @@ cp .env.example .env
 Run `snowflake/setup.sql` in a Snowflake worksheet to create the database, schemas, and raw tables.
 
 ### 3. Initial data load
+
 ```bash
 python -m venv venv
-source venv/bin/activate
-pip install requests pandas snowflake-connector-python python-dotenv dbt-snowflake streamlit plotly
-cd dags/scripts
-python ingest_fred.py          # Full historical load
+source venv/bin/activate              # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python dags/scripts/ingest_fred.py    # Full historical load
+```
+
+Use `--incremental` for subsequent runs to fetch only new observations:
+
+```bash
+python dags/scripts/ingest_fred.py --incremental
 ```
 
 ### 4. Run dbt transformations
