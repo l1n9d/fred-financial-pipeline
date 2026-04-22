@@ -110,30 +110,46 @@ if page == "Economic Overview":
     st.markdown("Key U.S. economic indicators from the FRED API, transformed through a dbt pipeline.")
 
     # KPI cards
+    # Defensive formatting: any indicator can be NULL in the latest row
+    # if FRED hasn't published the most recent period yet (common for
+    # UMCSENT, which is typically released with a ~2-week lag).
     if not summary.empty:
         row = summary.iloc[0]
+
+        def fmt_value(val, spec=".1f", suffix="%"):
+            """Format a numeric value or return 'N/A' if null."""
+            if pd.isna(val):
+                return "N/A"
+            return f"{val:{spec}}{suffix}"
+
+        def fmt_delta(val, spec="+.1f", suffix="pp"):
+            """Format a delta value or return None (Streamlit hides null deltas)."""
+            if pd.isna(val):
+                return None
+            return f"{val:{spec}}{suffix}"
+
         c1, c2, c3, c4 = st.columns(4)
         c1.metric(
             "Unemployment Rate",
-            f"{row['unemployment_current']:.1f}%",
-            f"{row['unemployment_mom_change']:+.1f}pp" if pd.notna(row['unemployment_mom_change']) else None,
+            fmt_value(row["unemployment_current"]),
+            fmt_delta(row["unemployment_mom_change"]),
             delta_color="inverse",
         )
         c2.metric(
             "Inflation (YoY)",
-            f"{row['inflation_current']:.1f}%",
-            f"{row['inflation_mom_change']:+.1f}pp" if pd.notna(row['inflation_mom_change']) else None,
+            fmt_value(row["inflation_current"]),
+            fmt_delta(row["inflation_mom_change"]),
             delta_color="inverse",
         )
         c3.metric(
             "Fed Funds Rate",
-            f"{row['fed_funds_current']:.2f}%",
-            f"{row['fed_funds_mom_change']:+.2f}pp" if pd.notna(row['fed_funds_mom_change']) else None,
+            fmt_value(row["fed_funds_current"], spec=".2f"),
+            fmt_delta(row["fed_funds_mom_change"], spec="+.2f"),
         )
         c4.metric(
             "Consumer Sentiment",
-            f"{row['sentiment_current']:.1f}",
-            f"{row['sentiment_mom_change']:+.1f}" if pd.notna(row['sentiment_mom_change']) else None,
+            fmt_value(row["sentiment_current"], suffix=""),
+            fmt_delta(row["sentiment_mom_change"], suffix=""),
         )
 
     st.markdown("---")
@@ -190,26 +206,70 @@ elif page == "Recession Risk Monitor":
     st.markdown("---")
 
     # Individual signals
+    # Emoji carries the main signal; status word is a small supporting label.
+    # Detail value sits beneath in a muted caption.
     st.subheader("Signal Status")
-    s1, s2, s3, s4, s5 = st.columns(5)
 
-    def signal_icon(val):
-        return "🔴 Active" if val == 1 else "🟢 Inactive"
+    def signal_status(val):
+        """Return (emoji, label) pair for a signal value. Handles NaN defensively."""
+        if pd.isna(val):
+            return ("⚪", "No Data")
+        return ("🔴", "Active") if val == 1 else ("🟢", "Inactive")
 
-    s1.metric("Sahm Rule", signal_icon(latest.get("signal_sahm_rule", 0)))
-    s1.caption(f"Value: {latest.get('sahm_rule_value', 'N/A')}")
+    def fmt_metric(val, spec=".2f", suffix=""):
+        """Format a numeric metric or return 'N/A' if null."""
+        if pd.isna(val):
+            return "N/A"
+        return f"{val:{spec}}{suffix}"
 
-    s2.metric("Yield Curve", signal_icon(latest.get("signal_yield_curve_inverted", 0)))
-    s2.caption(f"Spread: {latest.get('treasury_spread_10y2y', 'N/A')}")
+    signals = [
+        {
+            "label": "Sahm Rule",
+            "value": latest.get("signal_sahm_rule"),
+            "detail": f"Value: {fmt_metric(latest.get('sahm_rule_value'))}",
+        },
+        {
+            "label": "Yield Curve",
+            "value": latest.get("signal_yield_curve_inverted"),
+            "detail": f"Spread: {fmt_metric(latest.get('treasury_spread_10y2y'))}",
+        },
+        {
+            "label": "High Inflation",
+            "value": latest.get("signal_high_inflation"),
+            "detail": f"YoY: {fmt_metric(latest.get('inflation_rate_yoy'), suffix='%')}",
+        },
+        {
+            "label": "Low Sentiment",
+            "value": latest.get("signal_low_sentiment"),
+            "detail": f"Index: {fmt_metric(latest.get('consumer_sentiment'), spec='.1f')}",
+        },
+        {
+            "label": "Fed Tightening",
+            "value": latest.get("signal_fed_tightening"),
+            "detail": f"YoY Δ: {fmt_metric(latest.get('fed_funds_rate_yoy_change'), suffix='pp')}",
+        },
+    ]
 
-    s3.metric("High Inflation", signal_icon(latest.get("signal_high_inflation", 0)))
-    s3.caption(f"YoY: {latest.get('inflation_rate_yoy', 'N/A')}%")
-
-    s4.metric("Low Sentiment", signal_icon(latest.get("signal_low_sentiment", 0)))
-    s4.caption(f"Index: {latest.get('consumer_sentiment', 'N/A')}")
-
-    s5.metric("Fed Tightening", signal_icon(latest.get("signal_fed_tightening", 0)))
-    s5.caption(f"YoY Δ: {latest.get('fed_funds_rate_yoy_change', 'N/A')}pp")
+    cols = st.columns(5)
+    for col, sig in zip(cols, signals):
+        emoji, label = signal_status(sig["value"])
+        with col:
+            st.markdown(
+                f"""
+                <div style="text-align: left; padding: 0.25rem 0;">
+                    <div style="font-weight: 600; font-size: 0.95rem; margin-bottom: 0.25rem;">
+                        {sig['label']}
+                    </div>
+                    <div style="font-size: 0.5rem; line-height: 1.2;">
+                        {emoji} <span style="font-size: 1rem; font-weight: 500;">{label}</span>
+                    </div>
+                    <div style="color: #888; font-size: 0.85rem; margin-top: 0.4rem;">
+                        {sig['detail']}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     st.markdown("---")
 
