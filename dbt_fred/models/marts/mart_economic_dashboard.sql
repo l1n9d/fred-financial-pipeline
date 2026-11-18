@@ -21,6 +21,7 @@ signals as (
     select
         observation_month,
         sahm_rule_value,
+        sahm_data_complete,
         signal_sahm_rule,
         signal_yield_curve_inverted,
         signal_high_inflation,
@@ -69,6 +70,7 @@ dashboard as (
         -- Recession signals
         -- ============================================
         s.sahm_rule_value,
+        s.sahm_data_complete,
         s.signal_sahm_rule,
         s.signal_yield_curve_inverted,
         s.signal_high_inflation,

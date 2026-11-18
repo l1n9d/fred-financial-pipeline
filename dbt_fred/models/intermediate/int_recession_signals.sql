@@ -5,7 +5,8 @@
     indicators and produces a composite risk score.
 
     Signals (each outputs 1 = active/warning, 0 = inactive):
-      1. Sahm Rule — unemployment rises ≥0.5pp above trailing 12-month low
+      1. Sahm Rule — 3-month avg unemployment rises ≥0.5pp above the
+         lowest 3-month average of the PREVIOUS 12 months
       2. Inverted Yield Curve — 10Y-2Y Treasury spread goes negative
       3. High Inflation — YoY CPI inflation above 5%
       4. Consumer Sentiment Collapse — Michigan index below 60
@@ -24,24 +25,41 @@ indicators as (
     select * from {{ ref('int_indicators_with_changes') }}
 ),
 
+-- Compute the published Sahm value ONCE so the signal is decided on the
+-- same number the dashboard displays. Rounding only at display time let
+-- months show "0.50" next to a 0 signal, because the comparison saw
+-- 0.4951 while the reader saw 0.50.
+sahm as (
+    select
+        *,
+        round(unemployment_rate_3m_avg - unemployment_rate_3m_avg_12m_low, 2)
+            as sahm_rule_value
+    from indicators
+),
+
 signals as (
     select
         observation_month,
 
         -- ============================================
         -- Signal 1: Sahm Rule
-        -- 3-month avg unemployment rises ≥0.50pp above
-        -- its trailing 12-month low. Named after economist
-        -- Claudia Sahm. Historically 100% accurate at
-        -- identifying recessions since 1960.
+        -- 3-month avg unemployment rises ≥0.50pp above the
+        -- lowest 3-month average of the PREVIOUS 12 months
+        -- (t-12..t-1, excluding the current month). Named
+        -- after economist Claudia Sahm. Historically 100%
+        -- accurate at identifying recessions since 1960.
+        --
+        -- The value is legitimately negative when unemployment
+        -- is drifting down, and null when the underlying data
+        -- has a hole — sahm_data_complete tells those apart
+        -- from a genuine "not triggered".
         -- ============================================
         unemployment_rate_3m_avg,
-        unemployment_rate_12m_low,
-        round(unemployment_rate_3m_avg - unemployment_rate_12m_low, 2)
-            as sahm_rule_value,
+        unemployment_rate_3m_avg_12m_low,
+        sahm_rule_value,
+        sahm_rule_value is not null as sahm_data_complete,
         case
-            when (unemployment_rate_3m_avg - unemployment_rate_12m_low)
-                >= {{ var('sahm_rule_threshold') }}
+            when sahm_rule_value >= {{ var('sahm_rule_threshold') }}
             then 1 else 0
         end as signal_sahm_rule,
 
@@ -93,7 +111,7 @@ signals as (
             then 1 else 0
         end as signal_fed_tightening
 
-    from indicators
+    from sahm
 ),
 
 -- Compute the composite signal count ONCE, reuse it for risk level
