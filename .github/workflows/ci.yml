@@ -1,0 +1,78 @@
+# .github/workflows/ci.yml
+#
+# Phase 1 CI: the checks that need no Snowflake credentials.
+#
+# Why this shape:
+#   - pytest covers the ingestion script (14 tests, no network, no warehouse).
+#   - dbt parse validates the whole dbt project — YAML, refs, sources, vars and
+#     Jinja — without ever opening a connection, so no repo secrets are needed.
+#     The SNOWFLAKE_* values below are deliberate placeholders: profiles.yml
+#     resolves env_var() when the profile loads and errors if they are unset,
+#     but parsing never connects, so inert strings are enough.
+#
+# What this does NOT cover: anything that needs a live warehouse — dbt run,
+# dbt test, the singular tests and the dbt unit tests. See docs/roadmap.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Supersede in-flight runs on a PR branch, but let every run on main finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pytest:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # pytest.ini sets testpaths/addopts; conftest.py handles sys.path.
+      - name: Run pytest
+        run: pytest
+
+  dbt:
+    name: dbt parse
+    runs-on: ubuntu-latest
+    env:
+      # Placeholders, not secrets — see the header comment.
+      SNOWFLAKE_ACCOUNT: ci-placeholder
+      SNOWFLAKE_USER: ci-placeholder
+      SNOWFLAKE_PASSWORD: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # --profiles-dir . is required: the profile lives in the project dir so
+      # Airflow's containers can read it. Without the flag dbt would silently
+      # fall back to ~/.dbt/profiles.yml.
+      - name: Install dbt packages
+        run: dbt deps --profiles-dir .
+        working-directory: dbt_fred
+
+      - name: Parse dbt project
+        run: dbt parse --profiles-dir .
+        working-directory: dbt_fred
