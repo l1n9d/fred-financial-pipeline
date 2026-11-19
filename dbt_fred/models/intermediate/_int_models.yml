@@ -28,17 +28,59 @@ models:
           - unique
           - not_null
       - name: recession_risk_level
-        description: "LOW / MODERATE / ELEVATED / HIGH based on active signal count"
+        description: >
+          LOW / MODERATE / ELEVATED / HIGH based on active signal count, or
+          INSUFFICIENT DATA when fewer than min_measured_signals of the five
+          were backed by a value fresh enough to count. Affects the twelve
+          warm-up months of 2000, where only two signals have any history
+          behind them.
         tests:
           - accepted_values:
               arguments:
-                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH', 'INSUFFICIENT DATA']
+      - name: recession_signal_measured_count
+        description: >
+          How many of the five signals were decided on a value no older than
+          signal_staleness_months. The risk rule, both marts and the dashboard
+          header all read this one number; "1 of 5 active" means nothing
+          without it.
+        tests:
+          - not_null
+      - name: recession_signal_unknown_count
+        description: "5 - recession_signal_measured_count"
+        tests:
+          - not_null
       - name: sahm_data_complete
         description: >
-          False when sahm_rule_value could not be computed, so a 0 signal can be
-          read as "no data" rather than "not triggered". False for the series
-          warm-up (all of 2000) and for Oct-Dec 2025, whose 3-month averages
-          touch the missing October 2025 unemployment rate.
+          False when no Sahm value within signal_staleness_months is available,
+          so a 0 signal can be read as "no data" rather than "not triggered".
+          The raw sahm_rule_value is still null for Oct, Nov and Dec 2025 — the
+          three months whose 3-month averages touch the missing October 2025
+          unemployment rate — but Oct and Nov carry forward from September, so
+          only Dec 2025 is incomplete, along with the series warm-up in 2000.
+        tests:
+          - not_null
+      - name: treasury_spread_data_complete
+        description: "False when no 10Y-2Y spread within the staleness limit is available"
+        tests:
+          - not_null
+      - name: inflation_data_complete
+        description: >
+          False when no YoY inflation rate within the staleness limit is
+          available. Note this carries inflation_rate_yoy, never cpi_index:
+          filling the October 2025 CPI hole would give October 2026 a
+          fabricated year-ago baseline.
+        tests:
+          - not_null
+      - name: consumer_sentiment_data_complete
+        description: >
+          False when no sentiment reading within the staleness limit is
+          available. UMCSENT publishes with a lag, so the current month is
+          routinely carried forward from the previous one.
+        tests:
+          - not_null
+      - name: fed_funds_data_complete
+        description: "False when no YoY fed funds change within the staleness limit is available"
         tests:
           - not_null
 
@@ -161,9 +203,11 @@ unit_tests:
   - name: test_sahm_data_complete_flags_missing_data
     model: int_recession_signals
     description: >
-      With no computable value the signal still reports 0, because it feeds a
-      sum. sahm_data_complete is what separates that 0 from a real "not
-      triggered" reading.
+      A null value with nothing earlier to carry forward: the signal still
+      reports 0, because it feeds a sum, and sahm_data_complete is what
+      separates that 0 from a real "not triggered" reading. This is the
+      single-row case — see the staleness tests below for a null that DOES
+      have a recent value behind it.
     given:
       - input: ref('int_indicators_with_changes')
         rows:
@@ -171,3 +215,166 @@ unit_tests:
     expect:
       rows:
           - {observation_month: "2025-11-01", sahm_rule_value: , signal_sahm_rule: 0, sahm_data_complete: false}
+
+  # ------------------------------------------------------------------
+  # Carry-forward and the staleness limit (signal_staleness_months = 2).
+  #
+  # These fixtures are multi-row, unlike the threshold tests above: a
+  # carried value only exists if there is an earlier row to carry it from.
+  # ------------------------------------------------------------------
+
+  - name: test_sahm_carries_forward_within_limit
+    model: int_recession_signals
+    description: >
+      The real Oct-Dec 2025 shape. The October 2025 unemployment hole nulls
+      three consecutive 3-month averages. October and November are 1 and 2
+      months from September's real value, so they carry it and stay complete;
+      December is 3 months out and goes unknown.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2025-09-01", unemployment_rate_3m_avg: 4.30, unemployment_rate_3m_avg_12m_low: 3.60}
+          - {observation_month: "2025-10-01", unemployment_rate_3m_avg: , unemployment_rate_3m_avg_12m_low: 3.60}
+          - {observation_month: "2025-11-01", unemployment_rate_3m_avg: , unemployment_rate_3m_avg_12m_low: 3.60}
+          - {observation_month: "2025-12-01", unemployment_rate_3m_avg: , unemployment_rate_3m_avg_12m_low: 3.60}
+    expect:
+      rows:
+          - {observation_month: "2025-09-01", sahm_rule_value_effective: 0.70, sahm_rule_value_as_of_month: "2025-09-01", sahm_data_complete: true,  signal_sahm_rule: 1}
+          - {observation_month: "2025-10-01", sahm_rule_value_effective: 0.70, sahm_rule_value_as_of_month: "2025-09-01", sahm_data_complete: true,  signal_sahm_rule: 1}
+          - {observation_month: "2025-11-01", sahm_rule_value_effective: 0.70, sahm_rule_value_as_of_month: "2025-09-01", sahm_data_complete: true,  signal_sahm_rule: 1}
+          - {observation_month: "2025-12-01", sahm_rule_value_effective: 0.70, sahm_rule_value_as_of_month: "2025-09-01", sahm_data_complete: false, signal_sahm_rule: 0}
+
+  - name: test_stale_value_cannot_trigger_a_signal
+    model: int_recession_signals
+    description: >
+      Beyond the limit the carried value is still reported in *_effective for
+      provenance, but it must not fire the signal — otherwise a six-month-old
+      inversion would keep showing as a live warning.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-01-01", treasury_spread_10y2y: -0.50}
+          - {observation_month: "2026-02-01", treasury_spread_10y2y: }
+          - {observation_month: "2026-03-01", treasury_spread_10y2y: }
+          - {observation_month: "2026-04-01", treasury_spread_10y2y: }
+    expect:
+      rows:
+          - {observation_month: "2026-01-01", signal_yield_curve_inverted: 1, treasury_spread_data_complete: true}
+          - {observation_month: "2026-02-01", signal_yield_curve_inverted: 1, treasury_spread_data_complete: true}
+          - {observation_month: "2026-03-01", signal_yield_curve_inverted: 1, treasury_spread_data_complete: true}
+          - {observation_month: "2026-04-01", signal_yield_curve_inverted: 0, treasury_spread_data_complete: false}
+
+  - name: test_sentiment_gap_keeps_september_signal_in_october
+    model: int_recession_signals
+    description: >
+      The regression this issue exists for. Sentiment was 48.1 in September
+      2026 — below the threshold, so the signal was active and the composite
+      read MODERATE. October's UMCSENT had not published. The old code
+      answered the null with 0 and dropped the whole dashboard to LOW; now
+      October carries September's reading and stays MODERATE.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-09-01", consumer_sentiment: 48.1, treasury_spread_10y2y: 0.38, inflation_rate_yoy: 3.72, fed_funds_rate_yoy_change: -0.21, unemployment_rate_3m_avg: 4.30, unemployment_rate_3m_avg_12m_low: 4.30}
+          - {observation_month: "2026-10-01", consumer_sentiment: , treasury_spread_10y2y: 0.38, inflation_rate_yoy: , fed_funds_rate_yoy_change: -0.21, unemployment_rate_3m_avg: 4.30, unemployment_rate_3m_avg_12m_low: 4.30}
+    expect:
+      rows:
+          - {observation_month: "2026-09-01", signal_low_sentiment: 1, recession_signal_count: 1, recession_signal_measured_count: 5, recession_signal_unknown_count: 0, recession_risk_level: "MODERATE"}
+          - {observation_month: "2026-10-01", signal_low_sentiment: 1, recession_signal_count: 1, recession_signal_measured_count: 5, recession_signal_unknown_count: 0, recession_risk_level: "MODERATE"}
+
+  - name: test_insufficient_data_when_too_few_signals_measured
+    model: int_recession_signals
+    description: >
+      The series warm-up case. With only two of five signals backed by a
+      usable value, no risk level is published — a confident LOW built out of
+      three silences is worse than saying nothing. The active count is still a
+      real number, so downstream sums keep working.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2000-01-01", consumer_sentiment: 98.4, treasury_spread_10y2y: -0.11, inflation_rate_yoy: , fed_funds_rate_yoy_change: , unemployment_rate_3m_avg: , unemployment_rate_3m_avg_12m_low: }
+    expect:
+      rows:
+          - {observation_month: "2000-01-01", recession_signal_measured_count: 2, recession_signal_unknown_count: 3, recession_signal_count: 1, recession_risk_level: "INSUFFICIENT DATA"}
+  - name: test_inflation_carries_forward_over_the_cpi_gap
+    model: int_recession_signals
+    description: >
+      The October 2025 CPI hole, seen a year later. October 2026 CPI itself
+      WAS published — it is the year-ago denominator that is missing, so
+      inflation_rate_yoy is null for that month alone. The carried value and
+      its as-of month are what keep the signal measured. Note what is NOT
+      carried: cpi_index. Filling the raw hole would have October 2026
+      compute a year-over-year figure against an invented baseline and
+      publish it as a real measurement.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-09-01", inflation_rate_yoy: 3.72}
+          - {observation_month: "2026-10-01", inflation_rate_yoy: }
+    expect:
+      rows:
+          - {observation_month: "2026-09-01", inflation_rate_yoy_effective: 3.72, inflation_rate_yoy_as_of_month: "2026-09-01", inflation_data_complete: true, signal_high_inflation: 0}
+          - {observation_month: "2026-10-01", inflation_rate_yoy_effective: 3.72, inflation_rate_yoy_as_of_month: "2026-09-01", inflation_data_complete: true, signal_high_inflation: 0}
+
+  - name: test_fed_tightening_carry_and_staleness
+    model: int_recession_signals
+    description: >
+      Both halves of the rule on one fixture: an active tightening signal
+      carries for two months and keeps firing, then goes unknown at three.
+      The effective value is still reported at month four for provenance —
+      it is the flag, not the value, that stops the signal.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-01-01", fed_funds_rate_yoy_change: 1.20}
+          - {observation_month: "2026-02-01", fed_funds_rate_yoy_change: }
+          - {observation_month: "2026-03-01", fed_funds_rate_yoy_change: }
+          - {observation_month: "2026-04-01", fed_funds_rate_yoy_change: }
+    expect:
+      rows:
+          - {observation_month: "2026-01-01", fed_funds_rate_yoy_change_effective: 1.20, fed_funds_rate_yoy_change_as_of_month: "2026-01-01", fed_funds_data_complete: true,  signal_fed_tightening: 1}
+          - {observation_month: "2026-02-01", fed_funds_rate_yoy_change_effective: 1.20, fed_funds_rate_yoy_change_as_of_month: "2026-01-01", fed_funds_data_complete: true,  signal_fed_tightening: 1}
+          - {observation_month: "2026-03-01", fed_funds_rate_yoy_change_effective: 1.20, fed_funds_rate_yoy_change_as_of_month: "2026-01-01", fed_funds_data_complete: true,  signal_fed_tightening: 1}
+          - {observation_month: "2026-04-01", fed_funds_rate_yoy_change_effective: 1.20, fed_funds_rate_yoy_change_as_of_month: "2026-01-01", fed_funds_data_complete: false, signal_fed_tightening: 0}
+
+  - name: test_sentiment_goes_unknown_beyond_limit
+    model: int_recession_signals
+    description: >
+      Sentiment at the far end of the limit. The staleness mechanism itself is
+      already proven by the yield-curve test; what this adds is the wiring for
+      THIS signal — five near-identical blocks sit side by side in the model,
+      and a copy-paste that leaves one block reading another signal's flag
+      would pass every other test here. It also exercises a "below threshold"
+      rule rather than "below zero", so a carried value sitting under 60 does
+      not keep firing forever.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-06-01", consumer_sentiment: 48.1}
+          - {observation_month: "2026-07-01", consumer_sentiment: }
+          - {observation_month: "2026-08-01", consumer_sentiment: }
+          - {observation_month: "2026-09-01", consumer_sentiment: }
+    expect:
+      rows:
+          - {observation_month: "2026-06-01", consumer_sentiment_data_complete: true,  signal_low_sentiment: 1}
+          - {observation_month: "2026-07-01", consumer_sentiment_data_complete: true,  signal_low_sentiment: 1}
+          - {observation_month: "2026-08-01", consumer_sentiment_data_complete: true,  signal_low_sentiment: 1}
+          - {observation_month: "2026-09-01", consumer_sentiment_data_complete: false, signal_low_sentiment: 0}
+
+  - name: test_inflation_null_with_no_prior_value
+    model: int_recession_signals
+    description: >
+      The warm-up path on a signal other than the Sahm Rule: nothing has ever
+      published, so the as-of month is null, datediff returns null, and only
+      the coalesce(..., false) in the completeness CTE keeps the flag from
+      being null instead of false. A null flag would break the measured count
+      and the not_null test on it.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2000-01-01", inflation_rate_yoy: }
+          - {observation_month: "2000-02-01", inflation_rate_yoy: }
+    expect:
+      rows:
+          - {observation_month: "2000-01-01", inflation_rate_yoy_effective: , inflation_rate_yoy_as_of_month: , inflation_data_complete: false, signal_high_inflation: 0}
+          - {observation_month: "2000-02-01", inflation_rate_yoy_effective: , inflation_rate_yoy_as_of_month: , inflation_data_complete: false, signal_high_inflation: 0}

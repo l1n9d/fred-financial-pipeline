@@ -199,9 +199,23 @@ elif page == "Recession Risk Monitor":
     latest = df.dropna(subset=["recession_risk_level"]).iloc[-1]
     risk = latest["recession_risk_level"]
     signal_count = int(latest["recession_signal_count"])
+    measured = int(latest["recession_signal_measured_count"])
+    unknown = int(latest["recession_signal_unknown_count"])
 
-    risk_colors = {"LOW": "🟢", "MODERATE": "🟡", "ELEVATED": "🟠", "HIGH": "🔴"}
-    st.markdown(f"### Current Risk Level: {risk_colors.get(risk, '⚪')} **{risk}** ({signal_count}/5 signals active)")
+    risk_colors = {"LOW": "🟢", "MODERATE": "🟡", "ELEVATED": "🟠", "HIGH": "🔴",
+                   "INSUFFICIENT DATA": "⚪"}
+
+    # The headline says how many signals were actually measured, never just
+    # how many fired: "0 of 5 active" reads as all-clear even when half the
+    # inputs are missing. See int_recession_signals.sql.
+    if risk == "INSUFFICIENT DATA":
+        detail = f"{measured} of 5 signals measured"
+    elif unknown:
+        detail = f"{signal_count} of 5 active, {unknown} unknown"
+    else:
+        detail = f"{signal_count} of 5 active"
+
+    st.markdown(f"### Current Risk Level: {risk_colors.get(risk, '⚪')} **{risk}** ({detail})")
 
     st.markdown("---")
 
@@ -210,8 +224,15 @@ elif page == "Recession Risk Monitor":
     # Detail value sits beneath in a muted caption.
     st.subheader("Signal Status")
 
-    def signal_status(val):
-        """Return (emoji, label) pair for a signal value. Handles NaN defensively."""
+    def signal_status(val, data_complete):
+        """Return (emoji, label) for a signal.
+
+        A 0 signal means "did not trigger" only when the signal was backed by
+        a value fresh enough to count. Without that, 0 means "nobody has
+        measured this yet", which is what data_complete separates.
+        """
+        if pd.isna(data_complete) or not data_complete:
+            return ("⚪", "No Data")
         if pd.isna(val):
             return ("⚪", "No Data")
         return ("🔴", "Active") if val == 1 else ("🟢", "Inactive")
@@ -222,37 +243,66 @@ elif page == "Recession Risk Monitor":
             return "N/A"
         return f"{val:{spec}}{suffix}"
 
+    def fmt_as_of(as_of, spec=".2f", suffix="", val=None):
+        """Format the value a signal was decided on, tagged with its month.
+
+        The month is shown only when the value is carried forward from an
+        earlier month, so a current reading stays uncluttered.
+        """
+        text = fmt_metric(val, spec=spec, suffix=suffix)
+        if pd.isna(as_of) or pd.isna(val):
+            return text
+        as_of_ts = pd.Timestamp(as_of)
+        if as_of_ts.to_period("M") == pd.Timestamp(latest["observation_month"]).to_period("M"):
+            return text
+        return f"{text} ({as_of_ts.strftime('%b %Y')})"
+
     signals = [
         {
             "label": "Sahm Rule",
             "value": latest.get("signal_sahm_rule"),
-            "detail": f"Value: {fmt_metric(latest.get('sahm_rule_value'))}",
+            "complete": latest.get("sahm_data_complete"),
+            "detail": "Value: " + fmt_as_of(
+                latest.get("sahm_rule_value_as_of_month"),
+                val=latest.get("sahm_rule_value_effective")),
         },
         {
             "label": "Yield Curve",
             "value": latest.get("signal_yield_curve_inverted"),
-            "detail": f"Spread: {fmt_metric(latest.get('treasury_spread_10y2y'))}",
+            "complete": latest.get("treasury_spread_data_complete"),
+            "detail": "Spread: " + fmt_as_of(
+                latest.get("treasury_spread_10y2y_as_of_month"),
+                val=latest.get("treasury_spread_10y2y_effective")),
         },
         {
             "label": "High Inflation",
             "value": latest.get("signal_high_inflation"),
-            "detail": f"YoY: {fmt_metric(latest.get('inflation_rate_yoy'), suffix='%')}",
+            "complete": latest.get("inflation_data_complete"),
+            "detail": "YoY: " + fmt_as_of(
+                latest.get("inflation_rate_yoy_as_of_month"),
+                val=latest.get("inflation_rate_yoy_effective"), suffix="%"),
         },
         {
             "label": "Low Sentiment",
             "value": latest.get("signal_low_sentiment"),
-            "detail": f"Index: {fmt_metric(latest.get('consumer_sentiment'), spec='.1f')}",
+            "complete": latest.get("consumer_sentiment_data_complete"),
+            "detail": "Index: " + fmt_as_of(
+                latest.get("consumer_sentiment_as_of_month"),
+                val=latest.get("consumer_sentiment_effective"), spec=".1f"),
         },
         {
             "label": "Fed Tightening",
             "value": latest.get("signal_fed_tightening"),
-            "detail": f"YoY Δ: {fmt_metric(latest.get('fed_funds_rate_yoy_change'), suffix='pp')}",
+            "complete": latest.get("fed_funds_data_complete"),
+            "detail": "YoY Δ: " + fmt_as_of(
+                latest.get("fed_funds_rate_yoy_change_as_of_month"),
+                val=latest.get("fed_funds_rate_yoy_change_effective"), suffix="pp"),
         },
     ]
 
     cols = st.columns(5)
     for col, sig in zip(cols, signals):
-        emoji, label = signal_status(sig["value"])
+        emoji, label = signal_status(sig["value"], sig["complete"])
         with col:
             st.markdown(
                 f"""
@@ -284,6 +334,29 @@ elif page == "Recession Risk Monitor":
                   annotation_text="HIGH risk threshold")
     fig.add_hline(y=2, line_dash="dash", line_color="orange",
                   annotation_text="ELEVATED risk threshold")
+
+    # Shade stretches where at least one signal had no fresh value. The count
+    # is still a real count of active signals there, but it was drawn from
+    # fewer than five inputs, so the line shouldn't be read as an all-clear.
+    thin = filtered[filtered["recession_signal_unknown_count"] > 0]
+    if not thin.empty:
+        months = thin["observation_month"].sort_values().tolist()
+        start = prev = months[0]
+        spans = []
+        for m in months[1:]:
+            # More than ~1 month apart means a new stretch.
+            if (m - prev).days > 45:
+                spans.append((start, prev))
+                start = m
+            prev = m
+        spans.append((start, prev))
+        for span_start, span_end in spans:
+            fig.add_vrect(
+                x0=span_start, x1=span_end + pd.DateOffset(months=1),
+                fillcolor="#888", opacity=0.18, line_width=0, layer="below",
+            )
+        st.caption("Shaded months had at least one signal with no fresh value.")
+
     st.plotly_chart(fig, use_container_width=True)
 
     # Sahm Rule chart

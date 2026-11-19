@@ -143,9 +143,31 @@ December 2025** — the three months whose averaging window touches the gap. The
 twelve-month baseline then carries on from the averages that do exist, so the
 indicator is live again from January 2026 instead of blanking for a full year.
 
-Months with no publishable value are flagged by `sahm_data_complete = false`, which is
-what lets a consumer tell "no data" apart from "not triggered". It is also false for
-the series warm-up in 2000, before twelve prior months exist.
+### Unknown is not the same as all-clear
+
+A missing month used to be published as a quiet zero. Each signal is a threshold test,
+and a threshold test against a NULL answers "not triggered" — so a month nobody had
+measured yet looked exactly like a month that had been measured and come back calm.
+In October 2026 that turned a MODERATE reading into LOW, purely because consumer
+sentiment had not published: September's 48.1 was below the threshold and the signal
+was active, and nothing about the economy had changed in between.
+
+So each signal uses its **most recent published value and carries the month it came
+from**. Past `signal_staleness_months` (2) that value stops counting as a measurement:
+`<signal>_data_complete` goes false, the signal cannot fire, and the dashboard shows
+"No Data" rather than a green all-clear. If fewer than `min_measured_signals` (3) of
+the five were measured, no risk level is published at all — `INSUFFICIENT DATA`, which
+in practice covers the twelve warm-up months of 2000.
+
+What gets carried is the **signal input, never the underlying series**. Filling the
+October 2025 hole in `cpi_index` would give October 2026's year-over-year calculation a
+fabricated baseline and publish the result as a real measurement; carrying
+`inflation_rate_yoy` forward instead labels a stale number as stale.
+
+For the Sahm Rule this means the raw `sahm_rule_value` is still null for October,
+November and December 2025, but October and November carry September's value and stay
+complete. Only December 2025 — three months from the last real reading — and the 2000
+warm-up are flagged incomplete.
 
 ---
 
