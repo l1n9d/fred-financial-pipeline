@@ -1,20 +1,25 @@
+# Pins match the virtualenv this project actually runs on (Python 3.11), which
+# is what CI installs. The previous pins had drifted so far that the file was
+# unresolvable: dbt-snowflake 1.11 needs snowflake-connector-python >=4.0.0
+# (not 3.6.0), which in turn needs requests >=2.32.4 (not 2.31.0).
+
 # Core ingestion dependencies
-requests==2.31.0
-pandas==2.1.4
-python-dotenv==1.0.0
-tenacity==8.2.3
+requests==2.33.1
+pandas==3.0.2
+python-dotenv==1.2.2
+tenacity==9.1.4
 
 # Snowflake connectivity
-snowflake-connector-python==3.6.0
+snowflake-connector-python==4.3.0
 
 # dbt
-dbt-snowflake==1.11.0
-dbt-core==1.11.0
+dbt-snowflake==1.11.3
+dbt-core==1.11.7
 
 # Dashboard
-streamlit==1.32.0
-plotly==5.18.0
+streamlit==1.56.0
+plotly==6.6.0
 
 # Testing
-pytest==7.4.4
-pytest-mock==3.12.0
+pytest==9.0.3
+pytest-mock==3.15.1
