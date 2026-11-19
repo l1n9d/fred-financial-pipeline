@@ -88,3 +88,40 @@ open a branch PR in this repo can edit a workflow and print secrets, so the blas
 radius has to be bounded by the role itself: read-only `RAW`, writes confined to
 CI schemas, no production write path, and credentials rotatable independently of
 the ones in `.env`.
+
+---
+
+## C. Pin the Airflow container's Python packages
+
+`docker-compose.yml` installs dbt and the ingestion dependencies at container
+start, unpinned, in three places (the `airflow-init`, scheduler and webserver
+services):
+
+```
+pip install dbt-snowflake snowflake-connector-python requests python-dotenv
+```
+
+So the Airflow environment is whatever was latest on PyPI the day a container
+was built, independent of `requirements.txt` and of what CI installs. Three
+environments can therefore disagree: the local venv, CI, and Airflow. A silent
+major bump here would surface as a DAG failure at 06:00 UTC rather than as a red
+check on a PR.
+
+This matters more now that `requirements.txt` has been repinned to the versions
+the project actually runs (including pandas 3.x) — CI and local agree, Airflow
+still doesn't.
+
+Options, roughly in order of effort:
+
+1. Point the containers at the repo's own file: mount it and
+   `pip install -r /opt/airflow/requirements.txt`. Simplest, but it installs the
+   dashboard and test dependencies into Airflow too, and still re-installs on
+   every container start.
+2. Split out a smaller `requirements-airflow.txt` with just the DAG's runtime
+   needs, pinned, and install that instead.
+3. Build a custom image with a Dockerfile (`FROM apache/airflow:...` + a pinned
+   `pip install`), which is what the Airflow docs recommend and which also drops
+   the per-start install time.
+
+Note also that `docker-compose.yml` pins `apache/airflow:2.10.4-python3.11`
+while the README advertises Airflow 3.x — worth settling in the same pass.
