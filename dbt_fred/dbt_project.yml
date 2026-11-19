@@ -25,6 +25,14 @@ vars:
   low_sentiment_threshold: 60        # Michigan sentiment index floor
   fed_tightening_threshold: 1.0      # pp YoY increase in fed funds rate
 
+  # Missing-data policy for the signals (see int_recession_signals.sql).
+  # A signal uses its most recent published value; once that value is older
+  # than signal_staleness_months it counts as unknown rather than "not
+  # triggered". If fewer than min_measured_signals of the five are measured,
+  # no risk level is published at all.
+  signal_staleness_months: 2         # months a carried-forward value stays usable
+  min_measured_signals: 3            # below this, recession_risk_level is INSUFFICIENT DATA
+
 # ============================================
 # Model Configuration
 # This maps folder structure → Snowflake schemas

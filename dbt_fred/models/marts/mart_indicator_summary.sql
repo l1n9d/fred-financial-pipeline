@@ -25,6 +25,8 @@ latest as (
         treasury_spread_10y2y,
         inflation_rate_yoy,
         recession_signal_count,
+        recession_signal_measured_count,
+        recession_signal_unknown_count,
         recession_risk_level
     from {{ ref('mart_economic_dashboard') }}
     where observation_month = (
@@ -74,6 +76,10 @@ summary as (
         l.observation_month                             as latest_month,
         l.recession_risk_level                          as current_risk_level,
         l.recession_signal_count                        as active_signals,
+        -- How many of the five were backed by a fresh enough value.
+        -- "1 of 5 active" means nothing without this alongside it.
+        l.recession_signal_measured_count               as measured_signals,
+        l.recession_signal_unknown_count                as unknown_signals,
 
         -- Unemployment
         l.unemployment_rate                             as unemployment_current,

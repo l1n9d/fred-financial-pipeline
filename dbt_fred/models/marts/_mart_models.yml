@@ -15,11 +15,39 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH', 'INSUFFICIENT DATA']
+      - name: recession_signal_measured_count
+        description: >
+          How many of the five signals were decided on a value no older than
+          signal_staleness_months. The dashboard header reads this: "1 of 5
+          active" is misleading without it.
+        tests:
+          - not_null
+      - name: recession_signal_unknown_count
+        description: >
+          5 - recession_signal_measured_count. The historical chart shades the
+          months where this is above zero.
+        tests:
+          - not_null
       - name: sahm_data_complete
         description: >
-          False when sahm_rule_value is null, so the dashboard can tell "no data"
-          apart from "not triggered".
+          False when no Sahm value within the staleness limit is available, so
+          the dashboard can tell "no data" apart from "not triggered". The raw
+          sahm_rule_value is still null for Oct-Dec 2025, but Oct and Nov carry
+          forward from September, so only Dec 2025 and the 2000 warm-up are
+          incomplete.
+        tests:
+          - not_null
+      - name: treasury_spread_data_complete
+        tests:
+          - not_null
+      - name: inflation_data_complete
+        tests:
+          - not_null
+      - name: consumer_sentiment_data_complete
+        tests:
+          - not_null
+      - name: fed_funds_data_complete
         tests:
           - not_null
 
@@ -33,4 +61,8 @@ models:
         tests:
           - accepted_values:
               arguments:
-                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+                values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH', 'INSUFFICIENT DATA']
+      - name: measured_signals
+        description: "How many of the five signals had a value within the staleness limit"
+        tests:
+          - not_null
