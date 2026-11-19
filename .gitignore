@@ -12,7 +12,8 @@ venv/
 dbt_fred/target/
 dbt_fred/dbt_packages/
 dbt_fred/logs/
-dbt_fred/package-lock.yml
+# dbt_fred/package-lock.yml is tracked on purpose: it pins the dbt_utils
+# version so CI and local runs resolve the same package every time.
 
 # Airflow
 logs/

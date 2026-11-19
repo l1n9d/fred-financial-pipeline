@@ -1,5 +1,6 @@
 # FRED Financial Indicators Pipeline
 
+[![CI](https://github.com/l1n9d/fred-financial-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/l1n9d/fred-financial-pipeline/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![dbt](https://img.shields.io/badge/dbt-1.11-orange)
 ![Snowflake](https://img.shields.io/badge/Snowflake-Data_Warehouse-29B5E8)
