@@ -33,3 +33,141 @@ models:
           - accepted_values:
               arguments:
                 values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+      - name: sahm_data_complete
+        description: >
+          False when sahm_rule_value could not be computed, so a 0 signal can be
+          read as "no data" rather than "not triggered". False for the series
+          warm-up (all of 2000) and for Oct-Dec 2025, whose 3-month averages
+          touch the missing October 2025 unemployment rate.
+        tests:
+          - not_null
+
+
+unit_tests:
+
+  # ------------------------------------------------------------------
+  # The Sahm Rule baseline is the minimum of the 3-month AVERAGES over
+  # the PREVIOUS 12 months (t-12..t-1). These fixtures hold unemployment
+  # flat at 4.5 with an early dip to 3.0, chosen so every 3-month average
+  # divides exactly and the expected values are unambiguous.
+  # ------------------------------------------------------------------
+
+  - name: test_sahm_baseline_window_boundary
+    model: int_indicators_with_changes
+    description: >
+      The window includes t-12 and excludes t-13. The dip produces a 3.0 average
+      at month 3, which is month t-12 for 2025-03 (baseline 3.0) and month t-13
+      for 2025-04 (baseline 3.5, the next-lowest average). The old
+      "rows between 11 preceding and current row" window gets both wrong.
+      Months 1-12 have no baseline because 12 prior months do not exist yet,
+      which is also the warm-up case.
+    given:
+      - input: ref('int_economic_indicators_pivoted')
+        format: csv
+        fixture: sahm_window_input
+    expect:
+      format: csv
+      fixture: sahm_window_expected
+
+  - name: test_sahm_baseline_recovers_after_missing_month
+    model: int_indicators_with_changes
+    description: >
+      The D-prime rule for data holes, modelled on October 2025. A null
+      unemployment rate nulls the three 3-month averages whose window touches
+      it (2024-10/11/12) rather than silently averaging two months. The baseline
+      then carries on from the averages that DO exist, so 2025-01 onward still
+      resolves to 3.0 even though three of its twelve window months are empty.
+      A strict "all 12 must be present" baseline would return null here, blanking
+      the indicator for a year after every hole.
+    given:
+      - input: ref('int_economic_indicators_pivoted')
+        format: csv
+        fixture: sahm_gap_input
+    expect:
+      format: csv
+      fixture: sahm_gap_expected
+
+  - name: test_sahm_three_month_average_requires_three_observations
+    model: int_indicators_with_changes
+    description: >
+      avg() ignores nulls, so without the count guard a two-month average would
+      be published under the name unemployment_rate_3m_avg. All three months
+      whose window touches the hole must be null, and the average must resume
+      the first month the window clears it.
+    given:
+      - input: ref('int_economic_indicators_pivoted')
+        rows:
+          - {observation_month: "2024-01-01", unemployment_rate: 4.0}
+          - {observation_month: "2024-02-01", unemployment_rate: 4.0}
+          - {observation_month: "2024-03-01", unemployment_rate: 4.0}
+          - {observation_month: "2024-04-01", unemployment_rate: }
+          - {observation_month: "2024-05-01", unemployment_rate: 4.0}
+          - {observation_month: "2024-06-01", unemployment_rate: 4.0}
+          - {observation_month: "2024-07-01", unemployment_rate: 4.0}
+    expect:
+      rows:
+          - {observation_month: "2024-01-01", unemployment_rate_3m_avg: }
+          - {observation_month: "2024-02-01", unemployment_rate_3m_avg: }
+          - {observation_month: "2024-03-01", unemployment_rate_3m_avg: 4.0}
+          - {observation_month: "2024-04-01", unemployment_rate_3m_avg: }
+          - {observation_month: "2024-05-01", unemployment_rate_3m_avg: }
+          - {observation_month: "2024-06-01", unemployment_rate_3m_avg: }
+          - {observation_month: "2024-07-01", unemployment_rate_3m_avg: 4.0}
+
+  # ------------------------------------------------------------------
+  # Threshold behaviour. These take the averages as given, so they test
+  # only the subtraction, the rounding and the >= comparison.
+  # ------------------------------------------------------------------
+
+  - name: test_sahm_signal_triggers_at_threshold
+    model: int_recession_signals
+    description: >
+      0.50 exactly must trigger — the rule is "0.50 percentage points or more".
+      The signal is decided on the same rounded number the dashboard displays,
+      so a value shown as 0.50 can never sit next to a 0 signal.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2024-07-01", unemployment_rate_3m_avg: 4.10, unemployment_rate_3m_avg_12m_low: 3.60}
+    expect:
+      rows:
+          - {observation_month: "2024-07-01", sahm_rule_value: 0.50, signal_sahm_rule: 1, sahm_data_complete: true}
+
+  - name: test_sahm_signal_just_below_threshold
+    model: int_recession_signals
+    description: "0.49 must not trigger."
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2024-07-01", unemployment_rate_3m_avg: 4.09, unemployment_rate_3m_avg_12m_low: 3.60}
+    expect:
+      rows:
+          - {observation_month: "2024-07-01", sahm_rule_value: 0.49, signal_sahm_rule: 0, sahm_data_complete: true}
+
+  - name: test_sahm_value_negative_in_expansion
+    model: int_recession_signals
+    description: >
+      A negative value is correct, not a bug: the baseline excludes the current
+      month, so a falling unemployment rate puts the current average below it.
+      The value must survive unclamped and still count as complete data.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2026-08-01", unemployment_rate_3m_avg: 3.50, unemployment_rate_3m_avg_12m_low: 3.60}
+    expect:
+      rows:
+          - {observation_month: "2026-08-01", sahm_rule_value: -0.10, signal_sahm_rule: 0, sahm_data_complete: true}
+
+  - name: test_sahm_data_complete_flags_missing_data
+    model: int_recession_signals
+    description: >
+      With no computable value the signal still reports 0, because it feeds a
+      sum. sahm_data_complete is what separates that 0 from a real "not
+      triggered" reading.
+    given:
+      - input: ref('int_indicators_with_changes')
+        rows:
+          - {observation_month: "2025-11-01", unemployment_rate_3m_avg: , unemployment_rate_3m_avg_12m_low: 3.60}
+    expect:
+      rows:
+          - {observation_month: "2025-11-01", sahm_rule_value: , signal_sahm_rule: 0, sahm_data_complete: false}

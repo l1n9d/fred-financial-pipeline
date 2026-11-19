@@ -16,6 +16,12 @@ models:
           - accepted_values:
               arguments:
                 values: ['LOW', 'MODERATE', 'ELEVATED', 'HIGH']
+      - name: sahm_data_complete
+        description: >
+          False when sahm_rule_value is null, so the dashboard can tell "no data"
+          apart from "not triggered".
+        tests:
+          - not_null
 
   - name: mart_indicator_summary
     description: "Current snapshot of all indicators with latest values, trends, and historical context"

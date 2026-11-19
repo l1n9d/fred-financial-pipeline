@@ -113,13 +113,38 @@ composite risk score. Thresholds are configurable via dbt variables — see
 
 | Signal                     | Rule                                                  | Economic Basis                                                    |
 |----------------------------|-------------------------------------------------------|-------------------------------------------------------------------|
-| **Sahm Rule**              | 3-mo avg unemployment rises ≥0.50pp above 12-mo low   | 100% historical accuracy identifying U.S. recessions (Sahm, 2019) |
+| **Sahm Rule**              | 3-mo avg unemployment rises ≥0.50pp above the lowest 3-mo avg of the previous 12 months | 100% historical accuracy identifying U.S. recessions (Sahm, 2019) |
 | **Yield Curve Inversion**  | 10Y-2Y Treasury spread < 0                            | Has preceded every U.S. recession since 1970 (6-18 mo lead)       |
 | **High Inflation**         | YoY CPI > 5%                                          | Often triggers aggressive Fed tightening that slows the economy   |
 | **Low Consumer Sentiment** | University of Michigan index < 60                     | Signals consumer retrenchment and reduced spending                |
 | **Fed Tightening**         | Fed funds rate YoY increase ≥1pp                      | Aggressive rate hikes historically precede downturns              |
 
 **Composite Risk Levels:** LOW (0 signals) → MODERATE (1) → ELEVATED (2) → HIGH (3+)
+
+### A note on the Sahm Rule baseline
+
+The baseline is the minimum of the three-month *averages* over the *previous* twelve
+months (t-12 through t-1), not the minimum of the raw monthly rate and not a window
+that includes the current month. Both details matter: using the raw monthly minimum
+inflates the indicator, and including the current month makes it mathematically
+incapable of going negative — whereas the published series does go negative when
+unemployment is drifting down.
+
+### Missing data: October 2025
+
+There is no October 2025 unemployment rate. The BLS household survey for that month
+was cancelled during the government shutdown, so FRED returns a null and the pipeline
+stores one.
+
+Rather than let `avg()` quietly skip the hole and publish a two-month average under a
+three-month name, the pipeline reports **no Sahm value for October, November and
+December 2025** — the three months whose averaging window touches the gap. The
+twelve-month baseline then carries on from the averages that do exist, so the
+indicator is live again from January 2026 instead of blanking for a full year.
+
+Months with no publishable value are flagged by `sahm_data_complete = false`, which is
+what lets a consumer tell "no data" apart from "not triggered". It is also false for
+the series warm-up in 2000, before twelve prior months exist.
 
 ---
 
