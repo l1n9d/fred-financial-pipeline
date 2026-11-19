@@ -49,9 +49,6 @@ jobs:
   dbt:
     name: dbt parse
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dbt_fred
     env:
       # Placeholders, not secrets — see the header comment.
       SNOWFLAKE_ACCOUNT: ci-placeholder
@@ -74,6 +71,8 @@ jobs:
       # fall back to ~/.dbt/profiles.yml.
       - name: Install dbt packages
         run: dbt deps --profiles-dir .
+        working-directory: dbt_fred
 
       - name: Parse dbt project
         run: dbt parse --profiles-dir .
+        working-directory: dbt_fred
