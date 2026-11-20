@@ -123,7 +123,8 @@ Note: `docker-compose.yml` pins `apache/airflow:2.10.4-python3.11` and installs 
 - For local dbt runs, use `--profiles-dir .` so local and Airflow runs use
   the same profile.
 - Before saying a task is done, run `dbt build` and `pytest` and show me
-  the results.
+  the results, except for docs-only changes, where `dbt parse` (or `dbt ls`),
+  `pytest` and CI are enough.
 - After each change, explain what changed, why, and how I can verify it
   myself.
 - Indicators are rates or index levels: never sum them across months.

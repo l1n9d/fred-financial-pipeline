@@ -4,9 +4,9 @@
 ![Python](https://img.shields.io/badge/Python-3.11-blue)
 ![dbt](https://img.shields.io/badge/dbt-1.11-orange)
 ![Snowflake](https://img.shields.io/badge/Snowflake-Data_Warehouse-29B5E8)
-![Airflow](https://img.shields.io/badge/Airflow-3.x-017CEE)
+![Airflow](https://img.shields.io/badge/Airflow-2.10.4-017CEE)
 ![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B)
-![Tests](https://img.shields.io/badge/Tests-14_pytest_%7C_23_dbt-brightgreen)
+![Tests](https://img.shields.io/badge/Tests-14_pytest_%7C_53_dbt-brightgreen)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 An end-to-end analytics engineering pipeline that ingests U.S. economic
@@ -120,7 +120,10 @@ composite risk score. Thresholds are configurable via dbt variables — see
 | **Low Consumer Sentiment** | University of Michigan index < 60                     | Signals consumer retrenchment and reduced spending                |
 | **Fed Tightening**         | Fed funds rate YoY increase ≥1pp                      | Aggressive rate hikes historically precede downturns              |
 
-**Composite Risk Levels:** LOW (0 signals) → MODERATE (1) → ELEVATED (2) → HIGH (3+)
+**Composite Risk Levels:** LOW (0 signals) → MODERATE (1) → ELEVATED (2) → HIGH (3+).
+A fifth outcome is no level at all: **INSUFFICIENT DATA**, published when fewer
+than `min_measured_signals` (3) of the five signals were decided on a value
+inside the staleness limit — see *Unknown is not the same as all-clear* below.
 
 ### A note on the Sahm Rule baseline
 
@@ -195,14 +198,39 @@ warm-up are flagged incomplete.
 
 ## Data Quality
 
-### dbt Tests (23 total)
+### dbt Tests (53 run by `dbt test`)
 
-| Layer         | Test Count | Coverage                                                  |
-|---------------|------------|-----------------------------------------------------------|
-| Staging       | 9          | Uniqueness, not-null, accepted values on series IDs       |
-| Intermediate  | 7          | Not-null on pivoted indicators and derived metrics        |
-| Marts         | 5          | Referential integrity, not-null on dashboard fields       |
-| Freshness     | 2          | Source freshness checks on RAW observations and metadata  |
+`dbt test` runs 38 data tests and 15 unit tests. By kind:
+
+**Schema tests — 36, by layer**
+
+| Layer        | Count | Coverage                                                                 |
+|--------------|-------|--------------------------------------------------------------------------|
+| Staging      | 9     | Uniqueness and not-null on surrogate keys, accepted values on series IDs |
+| Intermediate | 14    | One row per month; not-null on both signal counts and all five `*_data_complete` flags; accepted values on `recession_risk_level`, `INSUFFICIENT DATA` included |
+| Marts        | 13    | The same guarantees carried onto the dashboard tables, plus the summary snapshot |
+
+**Singular tests — 2**
+
+Hand-written SQL in `dbt_fred/tests/`; both must return zero rows.
+
+- `assert_sahm_rule_value_in_range` — catches broken rolling-window logic
+- `assert_staging_to_intermediate_row_count` — catches pivot fanout or over-filtering
+
+**Unit tests — 15**
+
+Declared in `models/intermediate/_int_models.yml` and run against synthetic
+fixtures rather than warehouse data, so they pin behaviour that real data only
+exercises once in a while: the Sahm Rule's twelve-month baseline window boundary,
+three-month averages whose window touches a missing month, the ≥ comparison at
+exactly 0.50, carry-forward and the staleness limit for each of the five signals,
+and the `INSUFFICIENT DATA` warm-up case. CSV fixtures live in
+`dbt_fred/tests/fixtures/`.
+
+**Source freshness — 1, and not part of the 53**
+
+`RAW.FRED_OBSERVATIONS` warns at 48h and errors at 96h. It runs under
+`dbt source freshness`, which `dbt test` does not invoke.
 
 ### Python Tests (14 total)
 
@@ -212,7 +240,7 @@ argument parsing. Tests run in under a second with no credentials needed.
 
 ```bash
 pytest                # Run Python tests
-dbt test              # Run dbt tests (all 23)
+dbt test              # Run dbt tests (all 53)
 ```
 
 ---
@@ -274,16 +302,33 @@ to a production pipeline at a company with real traffic:
   (e.g., unemployment rate should always be between 0 and 25, not just non-null).
 
 ### Secrets & CI/CD
+- **Already shipped:** GitHub Actions CI on every pull request — `pytest` and
+  `dbt parse`, both of which run without warehouse credentials
+  (`.github/workflows/ci.yml`).
+- That CI validates structure only. It cannot catch SQL that is valid Jinja but
+  invalid Snowflake SQL, and it runs none of the warehouse-backed checks — no
+  `dbt run`, no schema tests, no singular tests, no unit tests. Adding
+  `dbt build` against a dedicated CI schema is the next step, alongside
+  `dbt compile --target ci` and SQL linting; `docs/roadmap.md` entries A and B
+  hold the research.
+- **Access is not least-privilege today.** `dbt_fred/profiles.yml` hardcodes
+  `role: ACCOUNTADMIN` plus a fixed database and warehouse, so dbt runs with far
+  more than it needs, and a CI target would write straight into the production
+  `STAGING` / `INTERMEDIATE` / `MARTS` schemas. Scoping that down — a dedicated
+  role with `SELECT` only on `RAW` and writes confined to its own CI schemas,
+  plus a target-aware `generate_schema_name` macro — has to land before any
+  credentials reach CI.
 - Move credentials from `.env` to **AWS Secrets Manager** or **Airflow Variables**
-  backed by a secrets backend.
-- Add **GitHub Actions** CI: `dbt parse`, `dbt compile --target ci`, `pytest`,
-  and SQL linting on every pull request.
+  backed by a secrets backend, and prefer key-pair auth over a password.
 
 ### Testing
+- **Already shipped:** 15 dbt `unit_tests` over the recession-signal logic, run
+  against synthetic fixtures — threshold boundaries, the missing-month path, and
+  carry-forward plus staleness for each of the five signals.
+- They do not run in CI yet: unit tests still need a warehouse connection, so
+  they are gated on the `dbt build` CI job above.
 - Expand pytest coverage to the Snowflake loading functions with a local
   Snowflake mock or integration tests against a dedicated test warehouse.
-- Add **dbt unit tests** for the recession-signal logic with synthetic fixture data
-  covering each signal's trigger condition.
 
 ---
 
@@ -292,26 +337,35 @@ to a production pipeline at a company with real traffic:
 ```
 fred-financial-pipeline/
 ├── README.md
+├── CLAUDE.md                      # Architecture notes and working rules
 ├── LICENSE
 ├── requirements.txt
 ├── pytest.ini
-├── docker-compose.yml             # Airflow (LocalExecutor) + PostgreSQL
+├── docker-compose.yml             # Airflow 2.10.4 (LocalExecutor) + PostgreSQL
 ├── .env.example                   # Credential template
 ├── .gitignore
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # pytest + dbt parse, no warehouse needed
 ├── dags/
-│   ├── fred_pipeline_dag.py       # Airflow DAG with SLAs, callbacks, doc_md
+│   ├── fred_pipeline_dag.py       # Airflow DAG: per-task timeouts, callbacks, doc_md
 │   └── scripts/
 │       ├── __init__.py
 │       └── ingest_fred.py         # FRED API → Snowflake ingestion
 ├── dbt_fred/
 │   ├── dbt_project.yml            # Includes vars for recession thresholds
 │   ├── packages.yml
-│   ├── profiles.yml
+│   ├── profiles.yml               # In the project dir so Airflow's containers can read it
 │   ├── macros/
-│   └── models/
-│       ├── staging/               # 2 models — clean and dedup
-│       ├── intermediate/          # 3 models — pivot, derive, signal
-│       └── marts/                 # 2 models — dashboard-ready
+│   │   └── generate_schema_name.sql
+│   ├── models/
+│   │   ├── staging/               # 2 models + _stg_models.yml, _stg_sources.yml
+│   │   ├── intermediate/          # 3 models + _int_models.yml (holds the 15 unit tests)
+│   │   └── marts/                 # 2 models + _mart_models.yml
+│   └── tests/
+│       ├── assert_sahm_rule_value_in_range.sql
+│       ├── assert_staging_to_intermediate_row_count.sql
+│       └── fixtures/              # CSV fixtures for the unit tests
 ├── streamlit/
 │   └── app.py                     # 4-page interactive dashboard
 ├── snowflake/
@@ -320,6 +374,7 @@ fred-financial-pipeline/
 │   ├── conftest.py
 │   └── test_ingest_fred.py        # 14 pytest tests
 └── docs/
+    ├── roadmap.md                 # Deferred work, with the research already done
     └── images/                    # Screenshots referenced in README
 ```
 
@@ -368,10 +423,16 @@ python dags/scripts/ingest_fred.py --incremental
 ```bash
 set -a && source .env && set +a       # Load env vars into shell for dbt
 cd dbt_fred
-dbt deps
-dbt run
-dbt test                              # All 23 tests should pass
+dbt deps --profiles-dir .
+dbt run --profiles-dir .
+dbt test --profiles-dir .             # All 53 tests should pass
 ```
+
+`--profiles-dir .` is not optional. `profiles.yml` is checked into `dbt_fred/`
+rather than `~/.dbt/` so Airflow's containers can read it; without the flag dbt
+silently falls back to `~/.dbt/profiles.yml`, which may point at a different
+account or database. The DAG and CI pass the same flag, so all three runs share
+one profile.
 
 ### 5. Start Airflow for scheduled runs
 
@@ -405,7 +466,7 @@ pytest                                # 14 Python tests, runs in <1s
 | Retry logic     | tenacity                | Exponential backoff on transient API errors       |
 | Storage         | Snowflake               | Cloud data warehouse (RAW → STAGING → MARTS)      |
 | Transformation  | dbt 1.11                | SQL modeling with testing and documentation       |
-| Orchestration   | Apache Airflow 3.x      | Daily scheduled pipeline with task dependencies   |
+| Orchestration   | Apache Airflow 2.10.4   | Daily scheduled pipeline with task dependencies   |
 | Visualization   | Streamlit, Plotly       | Interactive economic dashboard                    |
 | Containerization| Docker Compose          | Local Airflow deployment                          |
 | Testing         | pytest, pytest-mock     | Unit tests with mocked HTTP and Snowflake         |
