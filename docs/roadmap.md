@@ -48,8 +48,8 @@ whitespace, so budget for choosing a rule set rather than accepting all defaults
 
 Phase 1 CI validates structure only. It cannot catch SQL that is valid Jinja but
 invalid Snowflake SQL, and it runs none of the warehouse-backed checks: `dbt run`,
-the schema tests, the two singular tests in `dbt_fred/tests/`, or the three
-Sahm-rule `unit_tests` in `models/intermediate/_int_models.yml`. Running those in
+the schema tests, the two singular tests in `dbt_fred/tests/`, or the 15
+`unit_tests` in `models/intermediate/_int_models.yml`. Running those in
 CI means giving GitHub Actions real Snowflake credentials.
 
 **Blocker to fix first.** `macros/generate_schema_name.sql` returns
@@ -123,5 +123,51 @@ Options, roughly in order of effort:
    `pip install`), which is what the Airflow docs recommend and which also drops
    the per-start install time.
 
-Note also that `docker-compose.yml` pins `apache/airflow:2.10.4-python3.11`
-while the README advertises Airflow 3.x — worth settling in the same pass.
+Note that this entry is about *which* packages get installed, not which
+Airflow. The version itself is entry D, and the two overlap: a custom image
+(option 3 above) is also how the Airflow upgrade would land, so doing them in
+one pass is cheaper than doing them apart.
+
+---
+
+## D. Upgrade to Airflow 3
+
+`docker-compose.yml` pins `apache/airflow:2.10.4-python3.11`. The README used to
+advertise 3.x; as of the README-accuracy pass it says 2.10.4, so the docs and the
+compose file now agree and this is a real piece of deferred work rather than a
+discrepancy.
+
+**What it touches.** Airflow 3 is a major release — a new task execution API, the
+scheduler and UI reworked, and provider packages split out. The DAG itself is
+small and uses nothing exotic, but every one of these needs re-checking against
+3.x rather than assuming:
+
+- `schedule="0 6 * * *"` — the `schedule` argument is already the 2.4+ spelling,
+  so this is expected to carry over unchanged. Expected, not verified.
+- `on_failure_callback=alert_on_failure` and the callback's `context` keys
+  (`task_instance`, `dag_run`, `exception`) — callback signatures and the context
+  dict are exactly the sort of thing a major release trims.
+- `BashOperator` and `PythonOperator` — core in 2.x; confirm which package they
+  ship from in 3.x and whether a `apache-airflow-providers-*` pin is needed.
+- `dagrun_timeout`, `execution_timeout`, `max_active_runs`, `catchup` — all
+  expected to survive, all worth a read of the release notes.
+- The `doc_md` runbook renders in the UI; the UI is rebuilt in 3.x, so check it
+  still renders rather than assuming.
+
+**What has not been verified.** Nothing here has been tried. No 3.x container has
+been run against this DAG, and the list above is read off the DAG source, not off
+a migration run. Airflow ships `airflow db migrate` and a ruff-based upgrade check
+for exactly this — running those against a throwaway copy is step one, before any
+pin changes.
+
+**Do it with entry C.** The compose file installs dbt and the ingestion
+dependencies unpinned at container start, so an Airflow bump today would land on
+top of an environment that is already undefined. Building the custom image that
+entry C recommends is the same piece of work as choosing a new base image, and
+doing both at once means one rebuild and one round of verification instead of two.
+
+**Cost.** Local only — no Snowflake, no CI minutes. The real cost is the
+verification loop: bring up 3.x, confirm the DAG parses, trigger one run end to
+end, and read the task logs. The pipeline writes to the production `MARTS`
+schemas, so that run should target a scratch database or be done with the dbt
+tasks stubbed out, not pointed at production.
